@@ -9,10 +9,16 @@ It supports various backends including:
 - AWS Secrets Manager
 - AWS S3
 - GCP Secrets Manager
+- GCP KMS
 - [Google Sheets](#google-sheets)
-- [SOPS](https://github.com/mozilla/sops)-encrypted files
+- [SOPS](https://github.com/getsops/sops)-encrypted files
 - Terraform State
+- 1Password Connect
+- [Doppler](https://doppler.com/)
 - CredHub(Coming soon)
+- Pulumi State
+- Kubernetes
+- Conjur
 
 - Use `vals eval -f refs.yaml` to replace all the `ref`s in the file to actual values and secrets.
 - Use `vals exec -f env.yaml -- <COMMAND>` to populate envvars and execute the command.
@@ -106,7 +112,7 @@ metadata:
   name: release-name-mysql
   namespace: default
 stringData:
-  mysql-password: refs+vault://secret/data/foo#/mykey
+  mysql-password: ref+vault://secret/data/foo#/mykey
   mysql-root-password: vZQmqdGw3z
 type: Opaque
 ```
@@ -186,7 +192,7 @@ EOF
 
 `FRAGMENT` is a path-like expression that is used to extract a single value within the secret. When a fragment is specified, `vals` parse the secret value denoted by the `PATH` into a YAML or JSON object, and traverses the object following the fragment, and uses the value at the path as the final secret value. It's supposed to be the "fragment" componet of the URI as defined in [RFC3986](https://www.rfc-editor.org/rfc/rfc3986).
 
-Finally, the optional trailing `+` is the explit "end" of the expression. You usually don't need it, as if omitted, it treats anything after `ref+` and before the new-line or the end-of-line as an expression to be evaluated. An explicit `+` is handy when you want to do a simple string interpolation. That is, `foo ref+SECRET1+ ref+SECRET2+ bar` evaluates to `foo SECRET1_VALUE SECRET2_VALUE bar`.
+Finally, the optional trailing `+` is the explicit "end" of the expression. You usually don't need it, as if omitted, it treats anything after `ref+` and before the new-line or the end-of-line as an expression to be evaluated. An explicit `+` is handy when you want to do a simple string interpolation. That is, `foo ref+SECRET1+ ref+SECRET2+ bar` evaluates to `foo SECRET1_VALUE SECRET2_VALUE bar`.
 
 Although we mention the RFC for the sake of explanation, `PARAMS` and `FRAGMENT` might not be fully RFC-compliant as, under the hood, we use a simple regexp that seemed to work for most of use-cases.
 
@@ -201,15 +207,21 @@ Please see the [relevant unit test cases](https://github.com/helmfile/vals/blob/
 - [AWS Secrets Manager](#aws-secrets-manager)
 - [AWS S3](#aws-s3)
 - [GCP Secrets Manager](#gcp-secrets-manager)
+- [GCP KMS](#gcp-kms)
 - [Google Sheets](#google-sheets)
 - [Google GCS](#google-gcs)
-- [SOPS](#sops) powered by [sops](https://github.com/mozilla/sops)
+- [SOPS](#sops) powered by [sops](https://github.com/getsops/sops)
 - [Terraform (tfstate)](#terraform-tfstate) powered by [tfstate-lookup](https://github.com/fujiwara/tfstate-lookup)
 - [Echo](#echo)
 - [File](#file)
 - [Azure Key Vault](#azure-key-vault)
 - [EnvSubst](#envsubst)
 - [GitLab](#gitlab)
+- [1Password Connect](#1password-connect)
+- [Doppler](#doppler)
+- [Pulumi State](#pulumi-state)
+- [Kubernetes](#kubernetes)
+- [Conjur](#conjur)
 
 Please see [pkg/providers](https://github.com/helmfile/vals/tree/master/pkg/providers) for the implementations of all the providers. The package names corresponds to the URI schemes.
 
@@ -386,6 +398,24 @@ Examples:
 >
 > In some cases like you need to use an alternative credentials or project,
 > you'll likely need to set `GOOGLE_APPLICATION_CREDENTIALS` and/or `GCP_PROJECT` envvars.
+
+### GCP KMS
+
+- `ref+gkms://BASE64CIPHERTEXT?project=myproject&location=global&keyring=mykeyring&crypto_key=mykey`
+- `ref+gkms://BASE64CIPHERTEXT?project=myproject&location=global&keyring=mykeyring&crypto_key=mykey#/yaml_or_json_key/in/secret`
+
+Decrypts the URL-safe base64-encoded ciphertext using GCP KMS. Note that URL-safe base64 encoding is the same as "traditional" base64 encoding, except it uses _ and - in place of / and +, respectively. For example, to get a URL-safe base64-encoded ciphertext using the GCP CLI, you might run
+```
+echo test | gcloud kms encrypt \
+  --project myproject \
+  --location global \
+  --keyring mykeyring \
+  --key mykey \
+  --plaintext-file - \
+  --ciphertext-file - \
+  | base64 -w0 \
+  | tr '/+' '_-'
+```
 
 ### Google Sheets
 
@@ -576,6 +606,7 @@ Examples:
 
 - `ref+file://foo/bar` loads the file at `foo/bar`
 - `ref+file:///home/foo/bar` loads the file at `/home/foo/bar`
+- `ref+file://foo/bar?encode=base64` loads the file at `foo/bar` and encodes its content to a base64 string
 - `ref+file://some.yaml#/foo/bar` loads the YAML file at `some.yaml` and reads the value for the path `$.foo.bar`.
   Let's say `some.yaml` contains `{"foo":{"bar":"BAR"}}`, `key1: ref+file://some.yaml#/foo/bar` results in `key1: BAR`.
 
@@ -627,6 +658,115 @@ Examples:
 - `ref+gitlab://gitlab.com/11111/password`
 - `ref+gitlab://my-gitlab.org/11111/password?ssl_verify=true&scheme=https`
 
+### 1Password Connect
+
+For this provider to work you require a working and accessible [1Password connect server](https://developer.1password.com/docs/connect).
+The following env vars have to be configured:
+- `OP_CONNECT_HOST`
+- `OP_CONNET_TOKEN`
+
+1Password is organized in vaults and items.
+An item can have multiple fields with or without a section. Labels can be set on fields and sections.
+Vaults, items, sections and labels can be accessed by ID or by label/name (and IDs and labels can be mixed and matched in one URL).
+
+If a section does not have a label the field is only accessible via the section ID. This does not hold true for some default fields which may have no section at all (e.g.username and password for a `Login` item).
+
+*Caution: vals-expressions are parsed as URIs. For the 1Password connect provider the host component of the URI identifies the vault (by ID or name). Therefore vaults containing certain characters not allowed in the host component (e.g. whitespaces, see [RFC-3986](https://www.rfc-editor.org/rfc/rfc3986#section-3.2.2) for details) can only be accessed by ID.*
+
+Examples:
+
+- `ref+onepasswordconnect://VAULT_ID/ITEM_ID#/[SECTION_ID.]FIELD_ID`
+- `ref+onepasswordconnect://VAULT_LABEL/ITEM_LABEL#/[SECTION_LABEL.]FIELD_LABEL`
+- `ref+onepasswordconnect://VAULT_LABEL/ITEM_ID#/[SECTION_LABEL.]FIELD_ID`
+
+### Doppler
+
+- `ref+doppler://PROJECT/ENVIRONMENT/SECRET_KEY[?token=dp.XX.XXXXXX&address=https://api.doppler.com&no_verify_tls=false&include_doppler_defaults=false]`
+
+* `PROJECT` can be absent if the Token is a `Service Token` for that project. It can be set via `DOPPLER_PROJECT` envvar. See [Doppler docs](https://docs.doppler.com/docs/enclave-service-tokens) for more information.
+* `ENVIRONMENT` (aka: "Config") can be absent if the Token is a `Service Token` for that project. It can be set via `DOPPLER_ENVIRONMENT` envvar. See [Doppler docs](https://docs.doppler.com/docs/enclave-service-tokens) for more information.
+* `SECRET_KEY` can be absent and it will fetch all secrets for the project/environment.
+* `token` defaults to the value of the `DOPPLER_TOKEN` envvar.
+* `address` defaults to the value of the `DOPPLER_API_ADDR` envvar, if unset: `https://api.doppler.com`.
+* `no_verify_tls` default `false`.
+* `include_doppler_defaults` defaults to `false`, if set to `true` it will include the Doppler defaults for the project/environment (DOPPLER_ENVIRONMENT, DOPPLER_PROJECT and DOPPLER_CONFIG). It only works when `SECRET_KEY` is absent.
+
+Examples:
+
+(DOPPLER_TOKEN set as environment variable)
+
+- `ref+doppler:////` fetches all secrets for the project/environment when using a Service Token.
+- `ref+doppler:////FOO` fetches the value of secret with name `FOO` for the project/environment when using a Service Token.
+- `ref+doppler://#FOO` fetches the value of secret with name `FOO` for the project/environment when using a Service Token.
+- `ref+doppler://MyProject/development/DB_PASSWORD` fetches the value of secret with name `DB_PASSWORD` for the project named `MyProject` and environment named `development`.
+- `ref+doppler://MyProject/development/#DB_PASSWORD` fetches the value of secret with name `DB_PASSWORD` for the project named `MyProject` and environment named `development`.
+
+### Pulumi State
+
+Obtain value in state pulled from Pulumi Cloud REST API:
+
+- `ref+pulumistateapi://RESOURCE_TYPE/RESOURCE_LOGICAL_NAME/ATTRIBUTE_TYPE/ATTRIBUTE_KEY_PATH?project=PROJECT&stack=STACK`
+
+* `RESOURCE_TYPE` is a Pulumi [resource type](https://www.pulumi.com/docs/concepts/resources/names/#types) of the form `<package>:<module>:<type>`, where forward slashes (`/`) are replaced by a double underscore (`__`) and colons (`:`) are replaced by a single underscore (`_`). For example `aws:s3:Bucket` would be encoded as `aws__s3__Bucket` and `kubernetes:storage.k8s.io/v1:StorageClass` would be encoded as `kubernetes_storage.k8s.io__v1_StorageClass`.
+* `RESOURCE_LOGICAL_NAME` is the [logical name](https://www.pulumi.com/docs/concepts/resources/names/#logicalname) of the resource in the Pulumi program.
+* `ATTRIBUTE_TYPE` is either `outputs` or `inputs`.
+* `ATTRIBUTE_KEY_PATH` is a [GJSON](https://github.com/tidwall/gjson/blob/master/SYNTAX.md) expression that selects the desired attribute from the resource's inputs or outputs per the chosen `ATTRIBUTE_TYPE` value. You must encode any characters that would otherwise not comply with URI syntax, for example `#` becomes `%23`.
+* `project` is the Pulumi project name.
+* `stack` is the Pulumi stack name.
+
+Environment variables:
+
+- `PULUMI_API_ENDPOINT_URL` is the Pulumi API endpoint URL. Defaults to `https://api.pulumi.com`. You may also provide this as the `pulumi_api_endpoint_url` query parameter.
+- `PULUMI_ACCESS_TOKEN` is the Pulumi access token to use for authentication.
+- `PULUMI_ORGANIZATION` is the Pulumi organization to use for authentication. You may also provide this as an `organization` query parameter.
+
+Examples:
+
+- `ref+pulumistateapi://aws-native_s3_Bucket/my-bucket/outputs/bucketName?project=my-project&stack=my-stack`
+- `ref+pulumistateapi://aws-native_s3_Bucket/my-bucket/outputs/tags.%23(key==SomeKey).value?project=my-project&stack=my-stack`
+- `ref+pulumistateapi://kubernetes_storage.k8s.io__v1_StorageClass/gp2-encrypted/inputs/metadata.name?project=my-project&stack=my-stack`
+
+### Kubernetes
+
+Fetch value from Kubernetes:
+
+- `ref+k8s://API_VERSION/KIND/NAMESPACE/NAME/KEY[?kubeConfigPath=<path_to_kubeconfig>&kubeContext=<kubernetes context name>]`
+
+Authentication to the Kubernetes cluster is done by referencing the local kubeconfig file.
+The path to the kubeconfig can be specified as a URI parameter, read from the `KUBECONFIG` environment variable or the provider will attempt to read `$HOME/.kube/config`.
+The Kubernetes context can be specified as a URI parameteter.
+
+Environment variables:
+
+- `KUBECONFIG` contains the path to the Kubeconfig that will be used to fetch the secret.
+
+Examples:
+
+- `ref+k8s://v1/Secret/mynamespace/mysecret/foo`
+- `ref+k8s://v1/ConfigMap/mynamespace/myconfigmap/foo`
+- `ref+k8s://v1/Secret/mynamespace/mysecret/bar?kubeConfigPath=/home/user/kubeconfig`
+- `secretref+k8s://v1/Secret/mynamespace/mysecret/baz`
+- `secretref+k8s://v1/Secret/mynamespace/mysecret/baz?kubeContext=minikube`
+
+> NOTE: This provider only supports kind "Secret" or "ConfigMap" in apiVersion "v1" at this time.
+
+### Conjur
+
+This provider retrieves the value of secrets stored in [Conjur](https://www.conjur.org/).
+It's based on the https://github.com/cyberark/conjur-api-go lib.
+
+The following env vars have to be configured:
+- `CONJUR_APPLIANCE_URL`
+- `CONJUR_ACCOUNT`
+- `CONJUR_AUTHN_LOGIN`
+- `CONJUR_AUTHN_API_KEY`
+
+- `ref+conjur://PATH/TO/VARIABLE[?address=CONJUR_APPLIANCE_URL&account=CONJUR_ACCOUNT&login=CONJUR_AUTHN_LOGIN&apikey=CONJUR_AUTHN_API_KEY]/CONJUR_SECRET_ID`
+
+Example:
+
+- `ref+conjur://branch/variable_name`
+
 ## Advanced Usages
 
 ### Discriminating config and secrets
@@ -674,7 +814,7 @@ That's not the business of vals.
 
 Instead, use vals solely for composing sets of values that are then input to another templating engine or data manipulation language like Jsonnet and CUE.
 
-Note though, `vals` dose have support for simple string interpolation like usage. See [Expression Syntax](#expression-syntax) for more information.
+Note though, `vals` does have support for simple string interpolation like usage. See [Expression Syntax](#expression-syntax) for more information.
 
 ### Merge
 

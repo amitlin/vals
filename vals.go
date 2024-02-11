@@ -23,13 +23,19 @@ import (
 	"github.com/helmfile/vals/pkg/providers/awskms"
 	"github.com/helmfile/vals/pkg/providers/awssecrets"
 	"github.com/helmfile/vals/pkg/providers/azurekeyvault"
+	"github.com/helmfile/vals/pkg/providers/conjur"
+	"github.com/helmfile/vals/pkg/providers/doppler"
 	"github.com/helmfile/vals/pkg/providers/echo"
 	"github.com/helmfile/vals/pkg/providers/envsubst"
 	"github.com/helmfile/vals/pkg/providers/file"
 	"github.com/helmfile/vals/pkg/providers/gcpsecrets"
 	"github.com/helmfile/vals/pkg/providers/gcs"
 	"github.com/helmfile/vals/pkg/providers/gitlab"
+	"github.com/helmfile/vals/pkg/providers/gkms"
 	"github.com/helmfile/vals/pkg/providers/googlesheets"
+	"github.com/helmfile/vals/pkg/providers/k8s"
+	"github.com/helmfile/vals/pkg/providers/onepasswordconnect"
+	"github.com/helmfile/vals/pkg/providers/pulumi"
 	"github.com/helmfile/vals/pkg/providers/s3"
 	"github.com/helmfile/vals/pkg/providers/sops"
 	"github.com/helmfile/vals/pkg/providers/ssm"
@@ -62,25 +68,31 @@ const (
 	// secret cache size
 	defaultCacheSize = 512
 
-	ProviderVault            = "vault"
-	ProviderS3               = "s3"
-	ProviderGCS              = "gcs"
-	ProviderGitLab           = "gitlab"
-	ProviderSSM              = "awsssm"
-	ProviderKms              = "awskms"
-	ProviderSecretsManager   = "awssecrets"
-	ProviderSOPS             = "sops"
-	ProviderEcho             = "echo"
-	ProviderFile             = "file"
-	ProviderGCPSecretManager = "gcpsecrets"
-	ProviderGoogleSheets     = "googlesheets"
-	ProviderTFState          = "tfstate"
-	ProviderTFStateGS        = "tfstategs"
-	ProviderTFStateS3        = "tfstates3"
-	ProviderTFStateAzureRM   = "tfstateazurerm"
-	ProviderTFStateRemote    = "tfstateremote"
-	ProviderAzureKeyVault    = "azurekeyvault"
-	ProviderEnvSubst         = "envsubst"
+	ProviderVault              = "vault"
+	ProviderS3                 = "s3"
+	ProviderGCS                = "gcs"
+	ProviderGitLab             = "gitlab"
+	ProviderSSM                = "awsssm"
+	ProviderKms                = "awskms"
+	ProviderSecretsManager     = "awssecrets"
+	ProviderSOPS               = "sops"
+	ProviderEcho               = "echo"
+	ProviderFile               = "file"
+	ProviderGCPSecretManager   = "gcpsecrets"
+	ProviderGoogleSheets       = "googlesheets"
+	ProviderTFState            = "tfstate"
+	ProviderTFStateGS          = "tfstategs"
+	ProviderTFStateS3          = "tfstates3"
+	ProviderTFStateAzureRM     = "tfstateazurerm"
+	ProviderTFStateRemote      = "tfstateremote"
+	ProviderAzureKeyVault      = "azurekeyvault"
+	ProviderEnvSubst           = "envsubst"
+	ProviderOnePasswordConnect = "onepasswordconnect"
+	ProviderDoppler            = "doppler"
+	ProviderPulumiStateAPI     = "pulumistateapi"
+	ProviderGKMS               = "gkms"
+	ProviderK8s                = "k8s"
+	ProviderConjur             = "conjur"
 )
 
 var (
@@ -227,6 +239,23 @@ func (r *Runtime) prepare() (*expansion.ExpandRegexMatch, error) {
 			return p, nil
 		case ProviderEnvSubst:
 			p := envsubst.New(conf)
+			return p, nil
+		case ProviderOnePasswordConnect:
+			p := onepasswordconnect.New(conf)
+			return p, nil
+		case ProviderDoppler:
+			p := doppler.New(r.logger, conf)
+			return p, nil
+		case ProviderPulumiStateAPI:
+			p := pulumi.New(r.logger, conf, "pulumistateapi")
+			return p, nil
+		case ProviderGKMS:
+			p := gkms.New(r.logger, conf)
+			return p, nil
+		case ProviderK8s:
+			return k8s.New(r.logger, conf)
+		case ProviderConjur:
+			p := conjur.New(r.logger, conf)
 			return p, nil
 		}
 		return nil, fmt.Errorf("no provider registered for scheme %q", scheme)
@@ -429,6 +458,7 @@ var KnownValuesTypes = []string{
 	ProviderFile,
 	ProviderEcho,
 	ProviderEnvSubst,
+	ProviderPulumiStateAPI,
 }
 
 type ctx struct {
